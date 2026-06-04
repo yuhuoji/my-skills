@@ -1,4 +1,4 @@
 interface:
   display_name: "Doubao Thread Export"
-  short_description: "Export Doubao shared threads to md+zip."
-  default_prompt: "Use $doubao-thread-export to export a Doubao shared thread link into a Markdown file and a clean zip package."
+  short_description: "Export Doubao shared threads to a single zip package."
+  default_prompt: "Use $doubao-thread-export to export a Doubao shared thread link into a single clean zip package, first showing the default filename and asking whether to use it or provide a custom zip name."
