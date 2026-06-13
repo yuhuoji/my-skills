@@ -109,10 +109,16 @@ export function extractDoubaoThread(document) {
       if (fallback.length) blocks = blocks.concat(fallback);
     }
 
-    const hasImage = item.querySelector("img");
-    if (hasImage) {
-      blocks.push({ type: "image", alt: "message image" });
-    }
+    // Extract visible images with actual src URL
+    const images = item.querySelectorAll("img[src]");
+    images.forEach((img) => {
+      const src = img.getAttribute("src") || "";
+      const alt = cleanText(img.getAttribute("alt") || "message image");
+      // Skip data: URIs (inline base64) and tiny icons
+      if (src && !src.startsWith("data:") && !src.includes("emoji") && !src.includes("icon")) {
+        blocks.push({ type: "image", src, alt });
+      }
+    });
 
     if (blocks.length) {
       messages.push({ role, blocks });
