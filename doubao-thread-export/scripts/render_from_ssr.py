@@ -100,12 +100,18 @@ def enforce_hard_breaks(text: str) -> str:
 
 
 def curl_download(url: str, dest: Path, proxy: str | None, timeout: int = 60) -> bool:
-    cmd = ["curl", "-sS", "-L", "-m", str(timeout)]
+    cmd = ["curl", "-sS", "-L", "-m", str(timeout), "-f"]
     if proxy:
         cmd += ["--proxy", proxy, "--noproxy", ""]
     cmd += ["-o", str(dest), url]
     r = subprocess.run(cmd, capture_output=True, text=True)
-    return r.returncode == 0 and dest.exists() and dest.stat().st_size > 0
+    ok = r.returncode == 0 and dest.exists() and dest.stat().st_size > 0
+    if not ok and dest.exists():
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+    return ok
 
 
 def guess_image_ext(url: str) -> str:
