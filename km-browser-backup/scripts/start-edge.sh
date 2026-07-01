@@ -30,7 +30,13 @@ fi
 WINPOS="${KM_EDGE_WINPOS:-40,40}"
 WINSIZE="${KM_EDGE_WINSIZE:-1400,1000}"
 
-"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" \
+# Launch in the BACKGROUND without stealing focus.
+#   open -g : keep the app in the background (never comes to the foreground)
+#   open -n : force a brand-new instance so we never attach to the user's
+#             working Edge (which runs on the default profile)
+# The window still lives on the built-in display (WINPOS), but it never pops to
+# the front — the user only sees it if they deliberately switch to it.
+open -g -n -a "Microsoft Edge" --args \
   --remote-debugging-port="$PORT" \
   --user-data-dir="$PROFILE" \
   --window-position="$WINPOS" \
@@ -41,10 +47,9 @@ WINSIZE="${KM_EDGE_WINSIZE:-1400,1000}"
   --hide-crash-restore-bubble \
   --disable-sync \
   --disable-features=DialMediaRouteProvider,EdgeSync \
-  about:blank > /tmp/edge_km_debug.log 2>&1 &
+  about:blank > /tmp/edge_km_debug.log 2>&1
 
-PID=$!
-echo "started PID=$PID port=$PORT"
+echo "launched debug Edge in background (port=$PORT)"
 sleep 3
 
 # Verify
@@ -56,32 +61,46 @@ else
 fi
 
 # Edge account sync re-opens the user's work tabs on launch regardless of
-# --disable-sync. Close every tab that isn't about:blank so the debug browser
-# is a clean sandbox and never mirrors the user's working Edge.
+# --disable-sync, and it does so ASYNCHRONOUSLY — tabs keep trickling back for
+# several seconds. A one-shot cleanup misses the late arrivals, so we sweep
+# repeatedly over a short window and keep a single blank sandbox tab.
 /usr/bin/python3 - "$PORT" <<'PYEOF'
-import json, sys, urllib.request
+import json, sys, time, urllib.request
 port = sys.argv[1]
-try:
-    tabs = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5))
-except Exception as e:
-    print(f"tab cleanup skipped: {e}"); sys.exit(0)
-pages = [t for t in tabs if t.get('type') == 'page']
-blanks = [t for t in pages if t.get('url','').startswith('about:blank')]
-closed = 0
-for t in pages:
-    if t.get('url','').startswith('about:blank'):
-        continue
+
+def list_pages():
     try:
-        urllib.request.urlopen(f"http://127.0.0.1:{port}/json/close/{t['id']}", timeout=5)
-        closed += 1
+        tabs = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5))
     except Exception:
-        pass
-# Ensure at least one blank tab remains.
-if not blanks:
+        return None
+    return [t for t in tabs if t.get('type') == 'page']
+
+def close(tid):
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/json/close/{tid}", timeout=5)
+        return True
+    except Exception:
+        return False
+
+total_closed = 0
+# Sweep for ~10s: sync usually finishes restoring within a few seconds.
+for _ in range(10):
+    pages = list_pages()
+    if pages is None:
+        break
+    for t in pages:
+        if not t.get('url','').startswith('about:blank'):
+            if close(t['id']):
+                total_closed += 1
+    time.sleep(1)
+
+# Ensure at least one blank sandbox tab remains.
+pages = list_pages() or []
+if not any(p.get('url','').startswith('about:blank') for p in pages):
     try:
         urllib.request.urlopen(urllib.request.Request(
             f"http://127.0.0.1:{port}/json/new?about:blank", method='PUT'), timeout=5)
     except Exception:
         pass
-print(f"tab cleanup: closed {closed} synced tab(s), kept blank sandbox")
+print(f"tab cleanup: closed {total_closed} synced tab(s) over 10s, kept blank sandbox")
 PYEOF

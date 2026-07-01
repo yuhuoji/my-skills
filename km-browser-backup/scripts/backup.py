@@ -100,6 +100,7 @@ DOM_TO_MD_JS = r'''
   if (!root) return JSON.stringify({error: 'no ProseMirror'});
   const md = [];
   const imgs = [];
+  const emittedDrawio = new Set();
 
   // Pre-collect all pk-image nodes in DOM order with fixed idx
   const pmImgs = [...root.querySelectorAll('.pk-image')];
@@ -114,6 +115,27 @@ DOM_TO_MD_JS = r'''
     imgNodeToIdx.set(span, idx);
   });
 
+  // Pre-collect draw.io diagrams. Learn-city renders them as SVG but exposes
+  // the source image via `data-src` (points at /api/file/cdn/... — same origin
+  // as regular images, so it downloads with the same cookie). Dedupe by URL
+  // because the DOM often has multiple wrapper/copy nodes per diagram.
+  const drawioNodes = [...root.querySelectorAll('.pk-drawio[data-src]')];
+  const drawioNodeToIdx = new Map();
+  const drawioUrlSeen = new Map();
+  drawioNodes.forEach((node) => {
+    const url = node.getAttribute('data-src');
+    if (!url || url.startsWith('data:')) return;
+    let idx;
+    if (drawioUrlSeen.has(url)) {
+      idx = drawioUrlSeen.get(url);
+    } else {
+      idx = imgs.length + 1;
+      imgs.push({idx, url, alt: `流程图${idx}`});
+      drawioUrlSeen.set(url, idx);
+    }
+    drawioNodeToIdx.set(node, idx);
+  });
+
   function inline(node){
     if (!node) return '';
     if (node.nodeType === 3) return clean(node.textContent);
@@ -121,9 +143,22 @@ DOM_TO_MD_JS = r'''
     const cls = clsOf(node);
     const t = node.tagName;
     if (t === 'BR') return '\n';
+    // Inline collapse label ("点击展开内容"): drop the toggle text but keep the
+    // collapsed content that follows it. Emit only the .ct-collapse-content.
+    if (cls.includes('pk-collapse-title')) return '';
+    if (cls.includes('pk-collapse') && !cls.includes('pk-collapse-content')
+        && !cls.includes('pk-collapse-title')) {
+      const content = node.querySelector('.ct-collapse-content, .collapse-content');
+      return content ? inline(content) : '';
+    }
     if (cls.includes('pk-image')) {
       const idx = imgNodeToIdx.get(node);
       if (!idx) return '';
+      const alt = imgs[idx-1].alt;
+      return `![${alt}](__ASSETS__/图片${idx}__EXT__)`;
+    }
+    if (cls.includes('pk-drawio') && drawioNodeToIdx.has(node)) {
+      const idx = drawioNodeToIdx.get(node);
       const alt = imgs[idx-1].alt;
       return `![${alt}](__ASSETS__/图片${idx}__EXT__)`;
     }
@@ -164,6 +199,16 @@ DOM_TO_MD_JS = r'''
     // Skip UI chrome from km wrapper
     if (cls.includes('ai-abstract') || cls.includes('doc-toolbar') || cls.includes('doc-header-info')
         || cls.includes('subtitle-widget') || cls.includes('ProseMirror-widget')) return;
+
+    // Collapsible section (.pk-collapse): the ".pk-collapse-title" holds only
+    // the "点击展开内容" UI label — skip it and descend only into the real
+    // ".ct-collapse-content" so the label never bleeds into body text.
+    if (cls.includes('pk-collapse') && !cls.includes('pk-collapse-content')) {
+      const content = node.querySelector('.ct-collapse-content, .collapse-content');
+      if (content) [...content.children].forEach(block);
+      return;
+    }
+    if (cls.includes('pk-collapse-title')) return;
 
     if (cls.includes('pk-title')) {
       const text = clean(node.innerText).trim();
@@ -250,6 +295,20 @@ DOM_TO_MD_JS = r'''
       const line = inline(node);
       if (line) md.push(line);
       return;
+    }
+    // draw.io: node may be the .pk-drawio span itself or a wrapper containing
+    // one. Emit each diagram once (dedupe by idx) and stop descending.
+    {
+      const dnode = cls.includes('pk-drawio') && drawioNodeToIdx.has(node)
+        ? node : node.querySelector && node.querySelector('.pk-drawio');
+      if (dnode && drawioNodeToIdx.has(dnode)) {
+        const idx = drawioNodeToIdx.get(dnode);
+        if (!emittedDrawio.has(idx)) {
+          emittedDrawio.add(idx);
+          md.push(`![${imgs[idx-1].alt}](__ASSETS__/图片${idx}__EXT__)`);
+        }
+        return;
+      }
     }
     if (t === 'P' || t === 'DIV' || cls.includes('ct-paragraph')) {
       // Emit block per paragraph, but if this p contains an image, still keep it
