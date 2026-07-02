@@ -442,6 +442,14 @@ def backup_one(port, content_id, out_dir, prefix=''):
     try:
         cdp = CDP(ws_url)
         cdp.call('Page.enable'); cdp.call('Runtime.enable'); cdp.call('Network.enable')
+        # Strip the "HeadlessChrome" marker from the UA before navigation so any
+        # server-side UA check sees a normal Edge. Same UA used for image
+        # downloads below, so the whole session is coherent.
+        cdp.call('Network.setUserAgentOverride', {
+            'userAgent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                         'AppleWebKit/537.36 (KHTML, like Gecko) '
+                         'Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0'
+        })
         if not wait_dom(cdp, timeout=30):
             print(f"{prefix}[{content_id}] DOM not ready (may be SSO redirect or permission denied)")
             page_title = cdp.eval('document.title')
