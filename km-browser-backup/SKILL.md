@@ -28,6 +28,7 @@ description: 通过 CDP + 离屏 Edge 浏览器静默备份学城 (km.sankuai.co
 7. **数据源用 `data-origin` 而不是 `img.src`**：`.pk-image > img` 元素上有 `data-origin` 属性 = 原图 URL，避免读到低分辨率 `compress=@Nw_1l` 版本
 8. **图片下载**：从 Edge 拿 cookie，用 curl/Python urllib 带 `Cookie:` + `Referer:` 直接抓 `/api/file/cdn/` 原图
 9. **正文提取**：注入 JS 从 ProseMirror DOM 转 md（`.pk-title` → `#`、`.ct-heading` → `##/###`、`.ct-code` → 三反引号、`.pk-note` → `> [!NOTE]`）。SVG className 是 SVGAnimatedString 不是 string，用 `clsOf()` helper 兼容
+10. **breadcrumb 探测走 API,不要爬 DOM**：迁移到 `~/Downloads/km-docs/` 时,每篇的 space/父页链要从学城 API 拿——**`GET /api/collection/path/{contentId}`** 直接返回 `{idPath, pathAndTitle}`,一次性得到完整层级(空间 → 顶级父页 → ... → 当前文档)。**`GET /api/permission/content/{contentId}/getContentInfo`** 返回 `owner/creator` 的 MIS 号。之前用 DOM catalog-tree aria-level 走的思路不可靠(目录懒加载 + 无高亮当前项,点击展开按钮会误触 anchor 跳转),已弃用。这两个 API 从浏览器 cookie 就能鉴权,用 CDP `Runtime.evaluate` + `fetch(url, {credentials:'include'})` 即可。示例见 `/tmp/reorganize_km_docs.py` 的 `probe_via_api()`
 
 ## 使用流程
 
