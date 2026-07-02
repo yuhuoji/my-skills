@@ -19,7 +19,7 @@ description: 通过 CDP + 离屏 Edge 浏览器静默备份学城 (km.sankuai.co
 
 ## 核心原理
 
-1. **后台启动 + 内置屏**：Edge 用 `open -g -n` 后台启动（`-g` 不抢前台焦点、`-n` 强制新实例避免连到工作 Edge），窗口锚定内置显示器可见区 `--window-position=40,40`。注意：早期用 `--window-position=-32000,-32000` 想"离屏"，但 macOS 会把极端负坐标 clamp 到最近显示器——多屏（外接屏在负坐标区）时反而弹到外接屏，故弃用
+1. **默认无头启动**：Edge 用 `--headless=new` 无头启动（无窗口），这样在全屏 / 台前调度（Stage Manager）下都不会切 Space、抢前台、弹窗——是真正零打扰的唯一解。设 `KM_EDGE_HEADED=1` 可切回有头后台模式（`open -g -n`，窗口锚定内置屏 `--window-position=40,40`）。历史：早期用 `--window-position=-32000,-32000` 想"离屏"，但 macOS 把极端负坐标 clamp 到最近显示器，多屏下反而弹到外接屏；改有头 `open -g` 后又发现全屏/台前调度下仍会切 Space 抢前台，故最终默认无头
 2. **标签清理**：调试 profile 若登录了 MS 账号，Edge Sync 会把工作 Edge 的标签同步过来；`--disable-sync` 拦不住（异步回流）。启动后用 CDP 循环清理（10s 内反复关掉所有非 `about:blank` 标签），保持干净沙箱
 3. **懒加载触发**：学城 `.pk-image` 是空 span 直到被 scroll into center。逐个 pk-image `scrollIntoView({block:'center'})` + wait 1.2s + 重试触发 `<img data-origin>` 注入。**这一步必须做**——学城不是 IntersectionObserver 单纯依赖 viewport 高度
 4. **draw.io 流程图**：学城流程图是 `.pk-drawio[data-src]`（渲染成 SVG），**不是 `.pk-image`**。`data-src` 指向 `/api/file/cdn/...`（同源，同 cookie 可下载）。按 URL 去重（DOM 常有多个 wrapper/副本节点），下载为 `.svg`，正文里按 DOM 顺序插入 `![流程图N]` 引用
@@ -68,8 +68,7 @@ bash ~/.claude/skills/km-browser-backup/scripts/stop-edge.sh
 ## 反检测策略
 
 - **随机间隔**：批量时每篇文档之间 30-90s 随机 sleep
-- **User-Agent 保持真实**：Edge 默认 UA 就是真人浏览器，不需要伪装
-- **不使用 headless mode**：headless 会带 `HeadlessChrome` UA 特征，反而被识别；用 offscreen 有头保留真实指纹
+- **默认无头(headless)**：为彻底不打扰用户（全屏 / 台前调度下有头窗口会切 Space、抢前台），默认用 `--headless=new` 无头启动，没有窗口 = 绝不打断。代价：UA 带 `HeadlessChrome` 特征（理论反爬信号，实测当前学城未拦截）。需要盯着调试时设 `KM_EDGE_HEADED=1` 切回有头后台窗口模式
 - **图片下载复用同一 cookie**：跟浏览器同源，跟人手动查看图片的请求一致
 - **只读操作**：不点击、不评论、不编辑；只是加载页面 + 读 DOM
 

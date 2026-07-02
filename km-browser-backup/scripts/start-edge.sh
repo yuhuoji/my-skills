@@ -22,34 +22,49 @@ if lsof -i ":$PORT" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Window anchored inside the built-in (main) display's visible area.
-# macOS clamps extreme negative coords onto the nearest monitor, which on a
-# multi-display setup (external monitor at negative origin) pushed the window
-# onto the external screen. Keep it at a small positive origin so it always
-# lands on the built-in display. Override with KM_EDGE_WINDOW if needed.
+EDGE_BIN="/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+
+# Window anchored inside the built-in (main) display's visible area (only used
+# in headed mode). macOS clamps extreme negative coords onto the nearest
+# monitor, which on a multi-display setup pushed the window onto the external
+# screen — so we use a small positive origin instead of the old -32000 trick.
 WINPOS="${KM_EDGE_WINPOS:-40,40}"
 WINSIZE="${KM_EDGE_WINSIZE:-1400,1000}"
 
-# Launch in the BACKGROUND without stealing focus.
-#   open -g : keep the app in the background (never comes to the foreground)
-#   open -n : force a brand-new instance so we never attach to the user's
-#             working Edge (which runs on the default profile)
-# The window still lives on the built-in display (WINPOS), but it never pops to
-# the front — the user only sees it if they deliberately switch to it.
-open -g -n -a "Microsoft Edge" --args \
-  --remote-debugging-port="$PORT" \
-  --user-data-dir="$PROFILE" \
-  --window-position="$WINPOS" \
-  --window-size="$WINSIZE" \
-  --no-first-run \
-  --no-default-browser-check \
-  --no-restore-session-state \
-  --hide-crash-restore-bubble \
-  --disable-sync \
-  --disable-features=DialMediaRouteProvider,EdgeSync \
-  about:blank > /tmp/edge_km_debug.log 2>&1
-
-echo "launched debug Edge in background (port=$PORT)"
+# Launch mode:
+#   Default = HEADLESS. A headless browser has no window at all, so it can
+#   never steal focus, switch Spaces, or pop out of a fullscreen app — the only
+#   way to be truly non-disruptive under Stage Manager / fullscreen. Headless
+#   backup was verified to fetch body text, PNG images and draw.io SVGs fine.
+#   The one tradeoff is the UA carries a "HeadlessChrome" token (a theoretical
+#   anti-scraping signal), so set KM_EDGE_HEADED=1 to fall back to the windowed
+#   background launch when you need to watch/debug the browser.
+if [ "${KM_EDGE_HEADED:-0}" = "1" ]; then
+  echo "launching debug Edge (HEADED, background) on port=$PORT"
+  open -g -n -a "Microsoft Edge" --args \
+    --remote-debugging-port="$PORT" \
+    --user-data-dir="$PROFILE" \
+    --window-position="$WINPOS" \
+    --window-size="$WINSIZE" \
+    --no-first-run \
+    --no-default-browser-check \
+    --no-restore-session-state \
+    --hide-crash-restore-bubble \
+    --disable-sync \
+    --disable-features=DialMediaRouteProvider,EdgeSync \
+    about:blank > /tmp/edge_km_debug.log 2>&1
+else
+  echo "launching debug Edge (HEADLESS, no window) on port=$PORT"
+  "$EDGE_BIN" \
+    --headless=new \
+    --remote-debugging-port="$PORT" \
+    --user-data-dir="$PROFILE" \
+    --no-first-run \
+    --no-default-browser-check \
+    --disable-sync \
+    --disable-features=DialMediaRouteProvider,EdgeSync \
+    about:blank > /tmp/edge_km_debug.log 2>&1 &
+fi
 sleep 3
 
 # Verify
