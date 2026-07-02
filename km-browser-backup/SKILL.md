@@ -100,12 +100,13 @@ bash ~/.claude/skills/km-browser-backup/scripts/stop-edge.sh
 
 ## 输出目录约定（重要 - 默认行为）
 
-**所有学城文档最终必须按规范落到 `~/Downloads/km-docs/`**（规范见 `~/Downloads/km-docs/CONVENTIONS.md`）。除非用户明确指定其他路径,否则:
+**所有学城文档默认直接落到 `~/Downloads/km-docs/`**（规范见 `~/Downloads/km-docs/CONVENTIONS.md`）。除非用户明确指定其他路径,标准工作流是:
 
-- 抓取阶段可以用 `--out ~/Downloads/km-backup` 作为原始产物中转
-- **批次抓完后必须迁移合并到 `~/Downloads/km-docs`**——补 frontmatter(title/contentId/url/space/breadcrumb/owner)、按 breadcrumb 分目录、重写 assets 引用路径
-- 迁移完 `km-backup` 里**不留文档**——只是中转不是归档
-- 迁移脚本参考:`/tmp/migrate_to_km_docs.py`(探学城拿 space/owner/breadcrumb 再改写)
+1. **抓取阶段**:用临时目录（如 `/tmp/km-<timestamp>/`）作为中转,`backup.py --out /tmp/km-<ts>`
+2. **迁移阶段**:立即运行迁移(探 space/owner/breadcrumb 补 frontmatter → 按规范落到 `~/Downloads/km-docs/`)
+3. **清理阶段**:抓完 + 迁完后删掉临时目录,`km-docs` 是唯一归档
+
+**不要用 `~/Downloads/km-backup` 作中转** — 该目录已废弃,以后可能整个删除。迁移脚本参考:`/tmp/migrate_to_km_docs.py`(探学城拿 space/owner/breadcrumb 再改写)。当用户说"抓 XX 文档"时,默认按以上工作流:抓 → 迁 → 清临时目录,最终产物直接在 km-docs。
 
 ## 输出目录结构
 
