@@ -424,11 +424,20 @@ def download_image(url, cookies, referer, out_path):
     return out_path, len(data), ext
 
 def get_target_ws(port, url):
-    # Open new tab, get ws
-    api = f"http://127.0.0.1:{port}/json/new?{urllib.parse.quote(url, safe=':/?&=%')}"
-    r = urllib.request.urlopen(urllib.request.Request(api, method='PUT'), timeout=10)
-    d = json.loads(r.read())
-    return d['id'], d['webSocketDebuggerUrl']
+    # Create the tab in the BACKGROUND so a headed window never jumps to the
+    # foreground. The HTTP /json/new endpoint *activates* the new tab (steals
+    # focus / raises the window); CDP Target.createTarget with background:true
+    # does not — the tab loads without ever being brought forward. Works in both
+    # headless and headed modes.
+    bws = json.loads(urllib.request.urlopen(
+        f"http://127.0.0.1:{port}/json/version", timeout=5).read())['webSocketDebuggerUrl']
+    bcdp = CDP(bws)
+    try:
+        r = bcdp.call('Target.createTarget', {'url': url, 'background': True})
+        target_id = r['targetId']
+    finally:
+        bcdp.close()
+    return target_id, f"ws://127.0.0.1:{port}/devtools/page/{target_id}"
 
 def close_tab(port, tab_id):
     try:
@@ -442,6 +451,16 @@ def backup_one(port, content_id, out_dir, prefix=''):
     try:
         cdp = CDP(ws_url)
         cdp.call('Page.enable'); cdp.call('Runtime.enable'); cdp.call('Network.enable')
+        # A background tab (created with background:true so it never steals the
+        # foreground) gets throttled by Chromium: rAF/timers slow down and the
+        # tab reports as hidden, which breaks 学城's scroll-driven lazy image
+        # loading (0/N triggered). Emulation.setFocusEmulationEnabled makes the
+        # page believe it is focused & visible without actually raising the
+        # window — so lazy loading fires normally while the tab stays in back.
+        try:
+            cdp.call('Emulation.setFocusEmulationEnabled', {'enabled': True})
+        except Exception:
+            pass
         # Strip the "HeadlessChrome" marker from the UA before navigation so any
         # server-side UA check sees a normal Edge. Same UA used for image
         # downloads below, so the whole session is coherent.

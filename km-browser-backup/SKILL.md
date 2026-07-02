@@ -20,13 +20,14 @@ description: 通过 CDP + 离屏 Edge 浏览器静默备份学城 (km.sankuai.co
 ## 核心原理
 
 1. **默认无头启动**：Edge 用 `--headless=new` 无头启动（无窗口），这样在全屏 / 台前调度（Stage Manager）下都不会切 Space、抢前台、弹窗——是真正零打扰的唯一解。设 `KM_EDGE_HEADED=1` 可切回有头后台模式（`open -g -n`，窗口锚定内置屏 `--window-position=40,40`）。历史：早期用 `--window-position=-32000,-32000` 想"离屏"，但 macOS 把极端负坐标 clamp 到最近显示器，多屏下反而弹到外接屏；改有头 `open -g` 后又发现全屏/台前调度下仍会切 Space 抢前台，故最终默认无头
-2. **标签清理**：调试 profile 若登录了 MS 账号，Edge Sync 会把工作 Edge 的标签同步过来；`--disable-sync` 拦不住（异步回流）。启动后用 CDP 循环清理（10s 内反复关掉所有非 `about:blank` 标签），保持干净沙箱
-3. **懒加载触发**：学城 `.pk-image` 是空 span 直到被 scroll into center。逐个 pk-image `scrollIntoView({block:'center'})` + wait 1.2s + 重试触发 `<img data-origin>` 注入。**这一步必须做**——学城不是 IntersectionObserver 单纯依赖 viewport 高度
-4. **draw.io 流程图**：学城流程图是 `.pk-drawio[data-src]`（渲染成 SVG），**不是 `.pk-image`**。`data-src` 指向 `/api/file/cdn/...`（同源，同 cookie 可下载）。按 URL 去重（DOM 常有多个 wrapper/副本节点），下载为 `.svg`，正文里按 DOM 顺序插入 `![流程图N]` 引用
-5. **折叠区**：`.pk-collapse` 内 `.pk-collapse-title` 是"点击展开内容"UI 标签，必须跳过；只提取 `.ct-collapse-content` 实际内容。block() 和 inline() 两条路径都要处理（列表项内的内联折叠走 inline）
-6. **数据源用 `data-origin` 而不是 `img.src`**：`.pk-image > img` 元素上有 `data-origin` 属性 = 原图 URL，避免读到低分辨率 `compress=@Nw_1l` 版本
-7. **图片下载**：从 Edge 拿 cookie，用 curl/Python urllib 带 `Cookie:` + `Referer:` 直接抓 `/api/file/cdn/` 原图
-8. **正文提取**：注入 JS 从 ProseMirror DOM 转 md（`.pk-title` → `#`、`.ct-heading` → `##/###`、`.ct-code` → 三反引号、`.pk-note` → `> [!NOTE]`）。SVG className 是 SVGAnimatedString 不是 string，用 `clsOf()` helper 兼容
+2. **后台建标签 + 焦点模拟（有头也不抢前台的关键）**：**不要**用 HTTP `/json/new` 建标签——它会 activate 新标签、在有头模式下把窗口拽到前台。改用 CDP `Target.createTarget({url, background:true})` 后台创建，标签加载全程不抢焦点。但后台标签会被 Chromium 节流（rAF/timer 变慢、页面自认 hidden），导致学城 scroll 懒加载失效 `0/N triggered`；导航前调 `Emulation.setFocusEmulationEnabled({enabled:true})` 让页面"自认为"有焦点+可见，绕过节流，图片恢复 6/6，且窗口仍不弹前台。实测：抓取前后前台 app 不变，Edge 全程留后台
+3. **标签清理**：调试 profile 若登录了 MS 账号，Edge Sync 会把工作 Edge 的标签同步过来；`--disable-sync` 拦不住（异步回流）。启动后用 CDP 循环清理（10s 内反复关掉所有非 `about:blank` 标签），保持干净沙箱
+4. **懒加载触发**：学城 `.pk-image` 是空 span 直到被 scroll into center。逐个 pk-image `scrollIntoView({block:'center'})` + wait 1.2s + 重试触发 `<img data-origin>` 注入。**这一步必须做**——学城不是 IntersectionObserver 单纯依赖 viewport 高度
+5. **draw.io 流程图**：学城流程图是 `.pk-drawio[data-src]`（渲染成 SVG），**不是 `.pk-image`**。`data-src` 指向 `/api/file/cdn/...`（同源，同 cookie 可下载）。按 URL 去重（DOM 常有多个 wrapper/副本节点），下载为 `.svg`，正文里按 DOM 顺序插入 `![流程图N]` 引用
+6. **折叠区**：`.pk-collapse` 内 `.pk-collapse-title` 是"点击展开内容"UI 标签，必须跳过；只提取 `.ct-collapse-content` 实际内容。block() 和 inline() 两条路径都要处理（列表项内的内联折叠走 inline）
+7. **数据源用 `data-origin` 而不是 `img.src`**：`.pk-image > img` 元素上有 `data-origin` 属性 = 原图 URL，避免读到低分辨率 `compress=@Nw_1l` 版本
+8. **图片下载**：从 Edge 拿 cookie，用 curl/Python urllib 带 `Cookie:` + `Referer:` 直接抓 `/api/file/cdn/` 原图
+9. **正文提取**：注入 JS 从 ProseMirror DOM 转 md（`.pk-title` → `#`、`.ct-heading` → `##/###`、`.ct-code` → 三反引号、`.pk-note` → `> [!NOTE]`）。SVG className 是 SVGAnimatedString 不是 string，用 `clsOf()` helper 兼容
 
 ## 使用流程
 
@@ -96,6 +97,15 @@ bash ~/.claude/skills/km-browser-backup/scripts/stop-edge.sh
 | 首次配置 | 需登录一次 | 一次 oa 认证 |
 
 优先选本 skill 当"零埋点"是硬需求。要完美格式选 citadel。
+
+## 输出目录约定（重要 - 默认行为）
+
+**所有学城文档最终必须按规范落到 `~/Downloads/km-docs/`**（规范见 `~/Downloads/km-docs/CONVENTIONS.md`）。除非用户明确指定其他路径,否则:
+
+- 抓取阶段可以用 `--out ~/Downloads/km-backup` 作为原始产物中转
+- **批次抓完后必须迁移合并到 `~/Downloads/km-docs`**——补 frontmatter(title/contentId/url/space/breadcrumb/owner)、按 breadcrumb 分目录、重写 assets 引用路径
+- 迁移完 `km-backup` 里**不留文档**——只是中转不是归档
+- 迁移脚本参考:`/tmp/migrate_to_km_docs.py`(探学城拿 space/owner/breadcrumb 再改写)
 
 ## 输出目录结构
 
